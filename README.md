@@ -72,6 +72,19 @@ Scholarium flips traditional learning on its head. Instead of an AI *teaching* y
 
 ---
 
+## 🚀 v1.1 Performance & Accuracy Update
+
+We recently shipped a major update addressing speed and scoring consistency:
+- **Instant Chat Streaming:** Unblocked the AI provider layer to stream chunks directly to the UI for near-zero TTFB.
+- **Parallel Mode Detection:** Understanding vs. Socratic mode detection runs concurrently with response streaming, cutting LLM latency in half.
+- **Concurrent Eval Safety:** Implemented database locking (`status: 'evaluating'`) to prevent dashboard polling from firing redundant evaluation passes.
+- **O(1) Vector Bulk Inserts:** Replaced O(N) sequential vector chunk inserts with a native Supabase bulk insert, dramatically speeding up PDF processing.
+- **Deterministic Math:** Moved `overall_score` calculation out of the LLM and into a strict mathematical formula `(accuracy * 0.6) + (coverage * 0.4)` to prevent AI math hallucinations.
+- **RAG Context Filtering:** Added a strict `>= 0.6` cosine similarity threshold for vector search to eliminate context noise.
+- **Analytics Caching:** Wrapped dashboard aggregations in Next.js `unstable_cache` for instant dashboard loading.
+
+---
+
 ## 🛠️ Tech Stack
 
 | Category | Technology |

@@ -23,10 +23,20 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Session is still active' }, { status: 400 })
     }
 
-    // Skip if already evaluated
+    // Skip if already evaluated or currently evaluating
     if (session.evaluationReport) {
+      const reportObj = session.evaluationReport as any
+      if (reportObj.status === 'evaluating') {
+        return Response.json({ status: 'evaluating' }, { status: 202 })
+      }
       return Response.json({ report: session.evaluationReport })
     }
+
+    // Set lock to prevent concurrent evaluation runs from polling
+    await prisma.session.update({
+      where: { id: sessionId },
+      data: { evaluationReport: { status: 'evaluating' } },
+    })
 
     // Run evaluation
     const report = await evaluateSession(sessionId)

@@ -188,22 +188,55 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
         body: JSON.stringify({ sessionId, message: userMessage }),
       })
 
-      const data = await res.json()
-
-      if (data.error) {
-        toast.error(data.error)
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        toast.error(errorData.error || 'Failed to send message')
+        setMessages((prev) => prev.slice(0, -1)) // Remove user message on error
         return
       }
 
-      const aiMsg: Message = {
-        id: `ai-${Date.now()}`,
-        role: 'ai',
-        content: data.message,
-        mode: data.mode,
+      const reader = res.body?.getReader()
+      if (!reader) return
+
+      const decoder = new TextDecoder()
+      let aiContent = ''
+      let mode: 'understanding' | 'socratic' | null = null
+
+      const aiMsgId = `ai-${Date.now()}`
+      setMessages((prev) => [
+        ...prev,
+        { id: aiMsgId, role: 'ai', content: '', mode: null }
+      ])
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunkString = decoder.decode(value, { stream: true })
+        const lines = chunkString.split('\n').filter(Boolean)
+
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line)
+            if (data.error) {
+              toast.error(data.error)
+            } else if (data.chunk) {
+              aiContent += data.chunk
+            } else if (data.mode) {
+              mode = data.mode
+            }
+          } catch (e) {
+            // Ignore parse errors from split chunks
+          }
+        }
+
+        setMessages((prev) =>
+          prev.map((m) => (m.id === aiMsgId ? { ...m, content: aiContent, mode } : m))
+        )
       }
-      setMessages((prev) => [...prev, aiMsg])
     } catch {
       toast.error('Failed to send message')
+      setMessages((prev) => prev.slice(0, -1)) // Remove user message on error
     } finally {
       setIsLoading(false)
     }

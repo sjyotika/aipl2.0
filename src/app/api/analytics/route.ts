@@ -2,22 +2,14 @@ import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { prisma } from '@/lib/db'
 import type { EvaluationReport } from '@/lib/evaluation/schema'
+import { unstable_cache } from 'next/cache'
 
-export async function GET(request: NextRequest) {
-  try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    // Fetch all completed sessions with reports
+const getCachedAnalytics = unstable_cache(
+  async (userId: string) => {
+    // Fetch all sessions
     const sessions = await prisma.session.findMany({
       where: {
-        userId: user.id,
-        status: { in: ['completed', 'abandoned'] },
-        evaluationReport: { not: null },
+        userId: userId,
       },
       orderBy: { createdAt: 'desc' },
       select: {
@@ -32,13 +24,14 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    // Compute analytics
+    // Compute analytics only on completed/abandoned sessions with reports
     const reports = sessions
-      .filter((s) => s.evaluationReport)
+      .filter((s) => s.status !== 'active' && s.evaluationReport)
       .map((s) => ({
         ...s,
         report: s.evaluationReport as unknown as EvaluationReport,
       }))
+
 
     // Score trends (last 20 sessions)
     const scoreTrends = reports.slice(0, 20).reverse().map((s) => ({
@@ -145,7 +138,7 @@ export async function GET(request: NextRequest) {
     }
     longestStreak = Math.max(longestStreak, tempStreak)
 
-    return Response.json({
+    return {
       totalSessions: sessions.length,
       scoreTrends,
       avgScores,
@@ -166,7 +159,23 @@ export async function GET(request: NextRequest) {
           ? (s.evaluationReport as unknown as EvaluationReport).overall_score
           : null,
       })),
-    })
+    }
+  },
+  ['user-analytics-cache'],
+  { revalidate: 60, tags: ['analytics'] }
+)
+
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const data = await getCachedAnalytics(user.id)
+    return Response.json(data)
   } catch (error) {
     console.error('Analytics error:', error)
     return Response.json({ error: 'Internal server error' }, { status: 500 })

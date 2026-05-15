@@ -14,28 +14,35 @@ function getSupabaseAdmin() {
 export async function storeEmbeddings(
   chunks: { content: string; embedding: number[]; documentId: string; metadata: Record<string, unknown> }[]
 ): Promise<void> {
-  // Insert chunks one by one to handle vector type
-  for (const chunk of chunks) {
-    const { error } = await getSupabaseAdmin().rpc('insert_document_chunk', {
-      p_document_id: chunk.documentId,
-      p_content: chunk.content,
-      p_embedding: chunk.embedding,
-      p_metadata: chunk.metadata,
-    })
+  // Attempt native bulk insert first (much faster)
+  const formattedChunks = chunks.map((chunk) => ({
+    document_id: chunk.documentId,
+    content: chunk.content,
+    embedding: chunk.embedding,
+    metadata: chunk.metadata,
+  }))
 
-    if (error) {
-      // Fallback: insert without embedding if RPC not available
-      const { error: insertError } = await getSupabaseAdmin()
-        .from('document_chunks')
-        .insert({
-          document_id: chunk.documentId,
-          content: chunk.content,
-          metadata: chunk.metadata,
-        })
+  const { error } = await getSupabaseAdmin()
+    .from('document_chunks')
+    .insert(formattedChunks)
 
-      if (insertError) {
-        console.error('Failed to store chunk:', insertError)
-      }
+  if (error) {
+    console.error('Bulk insert failed, falling back to concurrent RPC:', error)
+    
+    // Process in batches of 50 to avoid connection pooling limits
+    const batchSize = 50
+    for (let i = 0; i < chunks.length; i += batchSize) {
+      const batch = chunks.slice(i, i + batchSize)
+      await Promise.all(
+        batch.map((chunk) =>
+          getSupabaseAdmin().rpc('insert_document_chunk', {
+            p_document_id: chunk.documentId,
+            p_content: chunk.content,
+            p_embedding: chunk.embedding,
+            p_metadata: chunk.metadata,
+          })
+        )
+      )
     }
   }
 }
@@ -60,47 +67,19 @@ export async function searchSimilarChunks(
 
     if (error) {
       console.error('Vector search error:', error)
-      // Fallback: return chunks based on text matching
-      return await fallbackTextSearch(query, sessionId, topK)
+      return []
     }
 
-    return (data || []).map((row: { content: string; similarity: number }) => ({
+    // Filter out chunks with low similarity to prevent random noise
+    const filteredData = (data || []).filter((row: { similarity: number }) => row.similarity >= 0.6)
+
+    return filteredData.map((row: { content: string; similarity: number }) => ({
       content: row.content,
       similarity: row.similarity,
     }))
   } catch (error) {
     console.error('Search failed:', error)
-    return await fallbackTextSearch(query, sessionId, topK)
+    return []
   }
 }
 
-/**
- * Fallback text-based search when vector search is unavailable
- */
-async function fallbackTextSearch(
-  _query: string,
-  sessionId: string,
-  topK: number
-): Promise<{ content: string; similarity: number }[]> {
-  // Step 1: Get document IDs for this session
-  const { data: docs } = await getSupabaseAdmin()
-    .from('documents')
-    .select('id')
-    .eq('session_id', sessionId)
-
-  if (!docs || docs.length === 0) return []
-
-  const docIds = docs.map((d: { id: string }) => d.id)
-
-  // Step 2: Fetch chunks for those documents
-  const { data } = await getSupabaseAdmin()
-    .from('document_chunks')
-    .select('content')
-    .in('document_id', docIds)
-    .limit(topK)
-
-  return (data || []).map((row: { content: string }) => ({
-    content: row.content,
-    similarity: 0.5,
-  }))
-}

@@ -71,8 +71,7 @@ export async function streamWithFallback(options: {
       messages: options.messages,
       maxOutputTokens: options.maxOutputTokens || 1024,
     })
-    // Eagerly await the first response header to detect auth/model errors early
-    await result.usage
+    // Return immediately to allow streaming to start
     return result
   } catch (error: unknown) {
     console.warn('Primary model (Groq) failed for streaming, falling back to Gemini:', error)
@@ -83,7 +82,6 @@ export async function streamWithFallback(options: {
         messages: options.messages,
         maxOutputTokens: options.maxOutputTokens || 1024,
       })
-      await result.usage
       return result
     } catch (fallbackError) {
       console.error('Fallback model (Gemini) also failed:', fallbackError)

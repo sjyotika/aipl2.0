@@ -9,15 +9,13 @@ Evaluate the student's understanding based ONLY on what they said. Score strictl
 You MUST respond with ONLY a valid JSON object matching this exact schema:
 
 {
-  "overall_score": <number 0-100>,
   "accuracy_score": <number 0-100>,
   "coverage_score": <number 0-100>,
   "conceptual_gaps": [<string descriptions of concepts the student missed or didn't address>],
   "misconceptions": [{"misconception": "<what they got wrong>", "correction": "<what's actually correct>"}],
   "improvement_suggestions": [<specific actionable suggestions>],
   "confidence_flag": <boolean - true if the student showed confidence, false if they seemed unsure>,
-  "session_narrative": "<2-3 sentence narrative describing how the student's explanation evolved during the session>",
-  "mode_transitions": [{"turn": <number>, "mode": "understanding" | "socratic"}]
+  "session_narrative": "<2-3 sentence narrative describing how the student's explanation evolved during the session>"
 }
 
 SCORING GUIDELINES:
@@ -93,9 +91,15 @@ export async function evaluateSession(sessionId: string): Promise<EvaluationRepo
     throw new Error('Evaluation produced invalid JSON')
   }
 
-  // Override mode_transitions with actual data from messages
+  // Inject deterministic overall score and actual mode transitions
   if (typeof parsed === 'object' && parsed !== null) {
-    (parsed as Record<string, unknown>).mode_transitions = modeTransitions
+    const obj = parsed as Record<string, unknown>
+    obj.mode_transitions = modeTransitions
+    
+    // Deterministic final score: 60% accuracy, 40% coverage
+    const accuracy = typeof obj.accuracy_score === 'number' ? obj.accuracy_score : 0
+    const coverage = typeof obj.coverage_score === 'number' ? obj.coverage_score : 0
+    obj.overall_score = Math.round((accuracy * 0.6) + (coverage * 0.4))
   }
 
   // Validate with Zod

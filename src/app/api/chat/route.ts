@@ -95,11 +95,11 @@ export async function POST(request: NextRequest) {
     // Get conversation history
     const history = await getSessionHistory(sessionId)
 
-    // Determine mode
-    const mode = await determineMode(message, history, session.topic)
+    // Start determineMode in parallel
+    const modePromise = determineMode(message, history, session.topic)
 
     // Build system prompt with RAG context
-    const systemPrompt = await buildSystemPrompt(mode, session.topic, sessionId, message)
+    const systemPrompt = await buildSystemPrompt('understanding', session.topic, sessionId, message) // Pass a default mode since BASE_PERSONA handles both dynamically
 
     // Stream AI response
     const result = await streamWithFallback({
@@ -108,18 +108,41 @@ export async function POST(request: NextRequest) {
       maxOutputTokens: 512,
     })
 
-    // Collect the full response for saving
-    let fullResponse = ''
-    const stream = result.textStream
-    for await (const chunk of stream) {
-      fullResponse += chunk
-    }
+    // Return a custom stream that yields JSON lines
+    const stream = new ReadableStream({
+      async start(controller) {
+        let fullResponse = ''
+        
+        // Stream text chunks
+        for await (const chunk of result.textStream) {
+          fullResponse += chunk
+          controller.enqueue(new TextEncoder().encode(JSON.stringify({ chunk }) + '\n'))
+        }
 
-    // Save AI response
-    const aiTurnNumber = await getCurrentTurnNumber(sessionId)
-    await saveMessage(sessionId, 'ai', fullResponse, mode, aiTurnNumber)
+        // Wait for mode detection to finish (it usually finishes before the stream)
+        let mode: 'understanding' | 'socratic' | null = null
+        try {
+          mode = await modePromise
+          controller.enqueue(new TextEncoder().encode(JSON.stringify({ mode }) + '\n'))
+        } catch (e) {
+          console.error('Mode detection failed', e)
+        }
 
-    return Response.json({ message: fullResponse, mode })
+        // Save AI response
+        const aiTurnNumber = await getCurrentTurnNumber(sessionId)
+        await saveMessage(sessionId, 'ai', fullResponse, mode, aiTurnNumber)
+
+        controller.close()
+      }
+    })
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    })
   } catch (error) {
     console.error('Chat error:', error)
     return Response.json({ error: 'Internal server error' }, { status: 500 })
