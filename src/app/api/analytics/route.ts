@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { prisma } from '@/lib/db'
-import type { EvaluationReport } from '@/lib/evaluation/schema'
+import { EvaluationReportSchema, type EvaluationReport } from '@/lib/evaluation/schema'
 import { unstable_cache } from 'next/cache'
 
 const getCachedAnalytics = unstable_cache(
@@ -25,12 +25,11 @@ const getCachedAnalytics = unstable_cache(
     })
 
     // Compute analytics only on completed/abandoned sessions with reports
-    const reports = sessions
-      .filter((s) => s.status !== 'active' && s.evaluationReport)
-      .map((s) => ({
-        ...s,
-        report: s.evaluationReport as unknown as EvaluationReport,
-      }))
+    const reports = sessions.flatMap((session) => {
+      if (session.status === 'active' || !session.evaluationReport) return []
+      const parsed = EvaluationReportSchema.safeParse(session.evaluationReport)
+      return parsed.success ? [{ ...session, report: parsed.data }] : []
+    })
 
 
     // Score trends (last 20 sessions)
@@ -149,7 +148,7 @@ const getCachedAnalytics = unstable_cache(
         longest: longestStreak,
         activeDays: sessionDates.length,
       },
-      recentSessions: sessions.slice(0, 10).map((s) => ({
+      recentSessions: sessions.map((s) => ({
         id: s.id,
         topic: s.topic,
         status: s.status,
@@ -162,7 +161,7 @@ const getCachedAnalytics = unstable_cache(
     }
   },
   ['user-analytics-cache'],
-  { revalidate: 60, tags: ['analytics'] }
+  { revalidate: 1, tags: ['analytics'] }
 )
 
 export async function GET(request: NextRequest) {

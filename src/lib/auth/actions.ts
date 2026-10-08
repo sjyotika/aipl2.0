@@ -58,7 +58,7 @@ export async function register(formData: FormData) {
 export async function loginWithGoogle() {
   const supabase = await createClient()
 
-  const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  const origin = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '')
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',

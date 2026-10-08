@@ -65,6 +65,8 @@ Scholarium flips traditional learning on its head. Instead of an AI *teaching* y
 - 🔄 **Dual-Mode System** — Auto-switches between Understanding & Socratic modes
 - 📄 **PDF RAG Pipeline** — Upload docs for ground-truth reference
 - 🎤 **Voice Input** — Speak your explanations with live transcription
+- 🌍 **Multilingual Sessions** — English, Hindi, Marathi, Telugu, and Tamil response and speech locales
+- 🖼️ **Diagram Evidence** — Attach private PNG, JPEG, or WEBP images for vision-assisted evaluation
 - 📊 **Evaluation Reports** — Scores, gaps, misconceptions, suggestions
 - 📈 **Analytics Dashboard** — Track learning progress over time
 - 🔐 **Auth** — Email/password + Google OAuth via Supabase
@@ -96,7 +98,7 @@ We recently shipped a major update addressing speed and scoring consistency:
 | Vector DB | pgvector (384-dim embeddings) |
 | Primary LLM | Groq — Llama 3.3 70B Versatile |
 | Fallback LLM | Google Gemini 2.0 Flash |
-| Embeddings | HuggingFace BAAI/bge-small-en-v1.5 |
+| Embeddings | HuggingFace paraphrase-multilingual-MiniLM-L12-v2 |
 | Auth | Supabase Auth |
 | Storage | Supabase Storage |
 | Voice | Web Speech API |
@@ -114,6 +116,8 @@ We recently shipped a major update addressing speed and scoring consistency:
 - Groq API key ([console.groq.com](https://console.groq.com))
 - Google AI API key ([aistudio.google.com](https://aistudio.google.com))
 - HuggingFace API key ([huggingface.co/settings/tokens](https://huggingface.co/settings/tokens))
+- Supabase Storage service-role key for private image uploads
+- Optional Faster-Whisper HTTP service URL for server transcription
 
 ### 1. Clone the Repository
 
@@ -182,6 +186,19 @@ $$ language plpgsql;
 npx prisma generate
 npx prisma db push
 ```
+
+### Multilingual and image configuration
+
+Set these server-only variables in `.env.local` when using the extended input pipeline:
+
+```env
+EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+FASTER_WHISPER_URL=https://your-whisper-service/transcribe
+GEMINI_VISION_MODEL=gemini-2.0-flash
+MAX_IMAGE_SIZE_MB=5
+```
+
+`FASTER_WHISPER_URL` is optional. Without it, supported browsers use their native speech recognition with the selected locale. Chat uses Groq first and falls back to Gemini, while image uploads are stored in a private Supabase `images` bucket and accessed by the server through short-lived signed URLs.
 
 ### 6. Run the Dev Server
 

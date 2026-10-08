@@ -1,10 +1,11 @@
 import { prisma } from '@/lib/db'
 import { generateWithFallback } from '@/lib/ai/provider'
+import { describeImage } from '@/lib/services/visionService'
 import { EvaluationReportSchema, type EvaluationReport } from './schema'
 
 const EVALUATION_PROMPT = `You are an expert educational evaluator. Analyze the following teaching session where a student attempted to explain a topic to a peer.
 
-Evaluate the student's understanding based ONLY on what they said. Score strictly — be honest but constructive.
+Evaluate meaning independently of the language used. Missing concepts are gaps, not misconceptions. A misconception requires an actively stated incorrect claim. Use attached images as additional evidence. Respond in {language}; retain technical terms in English when clearer. Score strictly — be honest but constructive.
 
 You MUST respond with ONLY a valid JSON object matching this exact schema:
 
@@ -35,7 +36,7 @@ Remember: Respond with ONLY the JSON object, no markdown, no code fences, no exp
 /**
  * Run the evaluation engine on a completed session
  */
-export async function evaluateSession(sessionId: string): Promise<EvaluationReport> {
+export async function evaluateSession(sessionId: string, options?: { language?: string; imageUrl?: string }): Promise<EvaluationReport> {
   // Fetch session and messages
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
@@ -50,26 +51,46 @@ export async function evaluateSession(sessionId: string): Promise<EvaluationRepo
     throw new Error('Session not found')
   }
 
-  // Build conversation transcript
-  const conversation = session.messages
+  const language = options?.language || session.language || 'en'
+  const languageInfo = `Selected response language: ${language}`
+  const imageInfo = options?.imageUrl || session.imageUrl ? 'An image was attached as additional evidence.' : ''
+  let imageDescription = ''
+  if (options?.imageUrl || session.imageUrl) {
+    try {
+      imageDescription = await describeImage(options?.imageUrl || session.imageUrl || '', 'Analyze this educational diagram as evidence. Identify visible structures, labels, relationships, and contradictions a student explanation might make. Do not merely caption it.')
+    } catch {
+      imageDescription = 'Image analysis failed; evaluate the available text normally.'
+    }
+  }
+  const conversation = [languageInfo, imageInfo, imageDescription].filter(Boolean).join('\n') + (languageInfo || imageInfo || imageDescription ? '\n\n' : '') + session.messages
     .map((m) => {
-      const modeStr = m.mode ? ` [${m.mode}]` : ''
-      return `${m.role.toUpperCase()}${modeStr}: ${m.content}`
+      const modeStr = m.mode ? ` [${m.mode}]` : '';
+      return `${m.role.toUpperCase()}${modeStr}: ${m.content}`;
     })
-    .join('\n\n')
+    .join('\n\n');
 
-  // Build mode transitions from actual message data
-  const modeTransitions = session.messages
-    .filter((m) => m.mode !== null)
-    .map((m) => ({
-      turn: m.turnNumber,
-      mode: m.mode as 'understanding' | 'socratic',
-    }))
+  // Fetch validated reference chunks for this session (only from documents with coversSelected = true)
+  const { data: validDocs } = await prisma.sessionDocumentValidation.findMany({
+    where: { sessionId, coversSelected: true },
+    select: { documentId: true },
+  })
+  const validDocIds = validDocs.map(v => v.documentId)
 
-  // Generate evaluation
-  const prompt = EVALUATION_PROMPT
+  // Pull a limited number of chunks from those documents (e.g., first 10)
+  const referenceChunks = await prisma.documentChunk.findMany({
+    where: { documentId: { in: validDocIds } },
+    take: 10,
+    select: { content: true },
+  })
+  const referenceText = referenceChunks.map(c => c.content).join('\n')
+
+  // Extend the prompt with reference context and request additional fields
+  const extendedPrompt = `${EVALUATION_PROMPT}\n\nReference content (for alignment check):\n${referenceText}\n\nAdditionally, include in the JSON output the fields:\n- answer_topic: main topic of the student's answer\n- reference_alignment: true if the answer aligns with the reference content, false otherwise`;
+
+  const prompt = extendedPrompt
     .replace('{topic}', session.topic)
     .replace('{conversation}', conversation)
+    .replace('{language}', language);
 
   const result = await generateWithFallback({
     system: 'You are a JSON-only evaluator. Output ONLY valid JSON, no markdown fences or extra text.',
@@ -91,15 +112,43 @@ export async function evaluateSession(sessionId: string): Promise<EvaluationRepo
     throw new Error('Evaluation produced invalid JSON')
   }
 
-  // Inject deterministic overall score and actual mode transitions
+  // Enrich parsed data with additional computed fields
   if (typeof parsed === 'object' && parsed !== null) {
-    const obj = parsed as Record<string, unknown>
-    obj.mode_transitions = modeTransitions
+    const obj = parsed as any
+    // Mode transitions
+    obj.mode_transitions = session.messages
+      .filter((message) => message.mode)
+      .map((message) => ({ turn: message.turnNumber, mode: message.mode! }))
     
     // Deterministic final score: 60% accuracy, 40% coverage
     const accuracy = typeof obj.accuracy_score === 'number' ? obj.accuracy_score : 0
     const coverage = typeof obj.coverage_score === 'number' ? obj.coverage_score : 0
     obj.overall_score = Math.round((accuracy * 0.6) + (coverage * 0.4))
+
+    // Fetch validation row for this session/document (assume one document per session for simplicity)
+    const validation = await prisma.sessionDocumentValidation.findFirst({
+      where: { sessionId },
+    })
+    const referenceValid = validation?.coversSelected ?? false
+    obj.reference_valid = referenceValid
+
+    // Determine answer_topic_match conceptually (simple normalized inclusion as fallback)
+    const answerTopic = (obj.answer_topic || '').toString().toLowerCase()
+    const sessionTopic = session.topic.toString().toLowerCase()
+    const match = answerTopic.includes(sessionTopic) || sessionTopic.includes(answerTopic)
+    obj.answer_topic_match = match
+
+    // Preserve factual_correctness separate from reference checks (use accuracy_score)
+    obj.factual_correctness = accuracy
+
+    // If reference is invalid, nullify final_score and add explanatory message
+    if (!referenceValid) {
+      obj.final_score = null
+      obj.message = 'Reference does not adequately cover the selected topic; please upload a more relevant document.'
+    } else {
+      // When reference is valid, final_score equals overall_score
+      obj.final_score = obj.overall_score
+    }
   }
 
   // Validate with Zod

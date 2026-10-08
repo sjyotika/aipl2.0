@@ -18,13 +18,18 @@ import {
   BookOpen,
   Sparkles,
 } from 'lucide-react'
+import LanguageSelector from '@/components/LanguageSelector'
+import { useLanguage } from '@/context/LanguageContext'
+import ImageUpload from '@/components/ImageUpload'
 
 export default function NewSessionPage() {
   const [topic, setTopic] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [isCreating, setIsCreating] = useState(false)
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
   const router = useRouter()
+  const { language } = useLanguage()
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const pdfFile = acceptedFiles[0]
@@ -61,14 +66,24 @@ export default function NewSessionPage() {
       const sessionRes = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: topic.trim() }),
+        body: JSON.stringify({ topic: topic.trim(), language }),
       })
 
       if (!sessionRes.ok) {
-        throw new Error('Failed to create session')
+        const errorData = await sessionRes.json().catch(() => null)
+        throw new Error(errorData?.error || 'Failed to create session')
       }
 
       const { sessionId } = await sessionRes.json()
+
+      if (imageUrl) {
+        const imageSessionRes = await fetch('/api/sessions', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, imageUrl }),
+        })
+        if (!imageSessionRes.ok) toast.error('Image could not be attached, but the session was created.')
+      }
 
       // Upload PDF if provided
       if (file) {
@@ -104,7 +119,7 @@ export default function NewSessionPage() {
 
       router.push(`/session/${sessionId}`)
     } catch (error) {
-      toast.error('Failed to create session. Please try again.')
+      toast.error(error instanceof Error ? error.message : 'Failed to create session. Please try again.')
       setIsCreating(false)
     }
   }
@@ -145,7 +160,13 @@ export default function NewSessionPage() {
           </div>
         </div>
 
-        {/* PDF Upload */}
+        <div className="space-y-3">
+          <Label className="text-sm font-medium">Conversation language</Label>
+          <LanguageSelector />
+        </div>
+
+        {/* Reference and multimodal input */}
+        <div className="grid gap-5 md:grid-cols-2">
         <div className="space-y-3">
           <Label className="text-sm font-medium">
             Reference Material{' '}
@@ -211,6 +232,15 @@ export default function NewSessionPage() {
               </p>
             </div>
           )}
+        </div>
+        <div className="space-y-3">
+          <Label className="text-sm font-medium">
+            Multimodal input <span className="text-muted-foreground font-normal">(optional)</span>
+          </Label>
+          <p className="text-xs text-muted-foreground">Attach a diagram, graph, handwritten explanation, or image. PNG, JPG, WEBP, max 5MB.</p>
+          <ImageUpload onUpload={setImageUrl} />
+          {imageUrl && <p className="text-xs text-success">Image attached to this session.</p>}
+        </div>
         </div>
 
         {/* Start Session */}

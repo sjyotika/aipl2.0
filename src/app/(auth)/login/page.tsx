@@ -1,7 +1,6 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { login, loginWithGoogle } from '@/lib/auth/actions'
 import { Button } from '@/components/ui/button'
@@ -14,7 +13,14 @@ import { Loader2, Mail, Lock, ArrowRight } from 'lucide-react'
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
-  const router = useRouter()
+
+  useEffect(() => {
+    const error = new URLSearchParams(window.location.search).get('error')
+    if (error) {
+      toast.error(error)
+      window.history.replaceState({}, '', '/login')
+    }
+  }, [])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()

@@ -112,7 +112,7 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/analytics')
+    fetch('/api/analytics', { cache: 'no-store' })
       .then((r) => {
         if (!r.ok) return null
         return r.json()
@@ -347,7 +347,7 @@ export default function DashboardPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-medium">
             <Clock className="size-4 text-chart-5" />
-            Recent Sessions
+            All Sessions
           </div>
         </div>
 

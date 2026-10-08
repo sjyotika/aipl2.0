@@ -71,7 +71,18 @@ export async function searchSimilarChunks(
     }
 
     // Filter out chunks with low similarity to prevent random noise
-    const filteredData = (data || []).filter((row: { similarity: number }) => row.similarity >= 0.6)
+    // Retrieve IDs of documents with valid coverage for this session
+    const { data: validDocs } = await getSupabaseAdmin()
+      .from('session_document_validation')
+      .select('document_id')
+      .eq('session_id', sessionId)
+      .eq('covers_selected', true)
+    const validDocIds = (validDocs || []).map((row: any) => row.document_id)
+
+    // Filter chunks to only those belonging to valid documents
+    const filteredData = (data || []).filter((row: any) =>
+      row.similarity >= 0.6 && validDocIds.includes(row.document_id)
+    )
 
     return filteredData.map((row: { content: string; similarity: number }) => ({
       content: row.content,
@@ -82,4 +93,3 @@ export async function searchSimilarChunks(
     return []
   }
 }
-

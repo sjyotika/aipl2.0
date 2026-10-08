@@ -121,6 +121,7 @@ export default function SessionReportClient({
 }: SessionReportClientProps) {
   const [report, setReport] = useState<EvaluationReport | null>(initialReport)
   const [isLoading, setIsLoading] = useState(!initialReport)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (initialReport) return
@@ -129,12 +130,19 @@ export default function SessionReportClient({
       try {
         const res = await fetch('/api/evaluate', {
           method: 'POST',
+          cache: 'no-store',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId }),
         })
         const data = await res.json()
         if (data.report) {
           setReport(data.report)
+          setIsLoading(false)
+          return true
+        }
+
+        if (res.status >= 400) {
+          setError(data.error || 'We could not analyze this session.')
           setIsLoading(false)
           return true
         }
@@ -153,6 +161,16 @@ export default function SessionReportClient({
 
     return () => clearInterval(interval)
   }, [sessionId, initialReport])
+
+  if (error) {
+    return (
+      <div className="max-w-4xl mx-auto p-6 text-center space-y-4">
+        <h1 className="text-2xl font-bold">Analysis unavailable</h1>
+        <p className="text-muted-foreground">{error}</p>
+        <Button onClick={() => window.location.reload()}>Try again</Button>
+      </div>
+    )
+  }
 
   if (isLoading || !report) {
     return (

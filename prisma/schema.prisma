@@ -1,9 +1,12 @@
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
+  provider   = "postgresql"
+
+  extensions = [vector]
 }
 
 model User {
@@ -23,6 +26,8 @@ model Session {
   userId           String    @map("user_id") @db.Uuid
   topic            String
   status           SessionStatus @default(active)
+  language         String?   @map("language")
+  imageUrl         String?   @map("image_url")
   evaluationReport Json?     @map("evaluation_report")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
@@ -32,6 +37,8 @@ model Session {
   documents Document[]
 
   @@index([userId])
+  validations SessionDocumentValidation[]
+
   @@map("sessions")
 }
 
@@ -56,13 +63,18 @@ model Document {
   fileName  String          @map("file_name")
   fileUrl   String          @map("file_url")
   processed Boolean         @default(false)
+  detectedTopic   String?   // LLM‑derived short topic
+  topicConfidence Float?   // Confidence score (0‑1) for topic detection
   createdAt DateTime        @default(now()) @map("created_at")
 
   session Session           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   chunks  DocumentChunk[]
 
   @@index([sessionId])
+  validations SessionDocumentValidation[]
+
   @@map("documents")
+
 }
 
 model DocumentChunk {
@@ -92,4 +104,23 @@ enum MessageRole {
 enum MessageMode {
   understanding
   socratic
+}
+
+model SessionDocumentValidation {
+  id            String   @id @default(uuid()) @db.Uuid
+  sessionId     String   @map("session_id") @db.Uuid
+  documentId    String   @map("document_id") @db.Uuid
+  selectedTopic String   // topic chosen for the session
+  primaryTopic  String   // LLM‑extracted main topic of the PDF
+  coveredTopics Json?    // array of topics/concepts covered
+  confidence    Float?   // confidence/relevance score (0‑1)
+  coversSelected Boolean // true if selectedTopic is sufficiently covered
+  evidence      String?  // brief reasoning from LLM
+  createdAt     DateTime @default(now())
+
+  session  Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, documentId])
+  @@map("session_document_validation")
 }

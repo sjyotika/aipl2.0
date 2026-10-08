@@ -11,10 +11,14 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { topic } = await request.json()
+    const { topic, language = 'en' } = await request.json()
 
     if (!topic || typeof topic !== 'string' || topic.trim().length === 0) {
       return Response.json({ error: 'Topic is required' }, { status: 400 })
+    }
+
+    if (!['en', 'hi', 'mr', 'te', 'ta'].includes(language)) {
+      return Response.json({ error: 'Unsupported language' }, { status: 400 })
     }
 
     // Ensure user exists in our database
@@ -36,6 +40,7 @@ export async function POST(request: NextRequest) {
       data: {
         userId: user.id,
         topic: topic.trim(),
+        language,
         status: 'active',
       },
     })
@@ -43,7 +48,45 @@ export async function POST(request: NextRequest) {
     return Response.json({ sessionId: session.id })
   } catch (error) {
     console.error('Failed to create session:', error)
+
+    const message = error instanceof Error ? error.message.toLowerCase() : ''
+    if (message.includes('password authentication failed')) {
+      return Response.json(
+        { error: 'Database authentication failed. Update DATABASE_URL with the current Supabase database password.' },
+        { status: 503 }
+      )
+    }
+
+    if (message.includes("can't reach database server") || message.includes('enotfound')) {
+      return Response.json(
+        { error: 'Database connection failed. Check the Supabase DATABASE_URL.' },
+        { status: 503 }
+      )
+    }
+
     return Response.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const { sessionId, imageUrl } = await request.json()
+    if (!sessionId || typeof imageUrl !== 'string' || !imageUrl.startsWith(`${user.id}/`)) {
+      return Response.json({ error: 'Invalid session image' }, { status: 400 })
+    }
+
+    const session = await prisma.session.updateMany({
+      where: { id: sessionId, userId: user.id },
+      data: { imageUrl },
+    })
+    if (session.count === 0) return Response.json({ error: 'Session not found' }, { status: 404 })
+    return Response.json({ ok: true })
+  } catch {
+    return Response.json({ error: 'Failed to attach image' }, { status: 500 })
   }
 }
 

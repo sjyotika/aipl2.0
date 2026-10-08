@@ -48,6 +48,34 @@ export async function POST(request: NextRequest) {
           continue
         }
 
+        // Analyze document content for topic coverage
+        const { prisma: prismaImport } = await import('@/lib/db')
+        const session = await prismaImport.session.findUnique({ where: { id: sessionId }, select: { topic: true } })
+        const analysis = await import('@/lib/rag/documentAnalyzer').then(m => m.analyzeDocumentContent(text, session?.topic ?? ''))
+
+        // Update Document with detected topic and confidence
+        await prisma.document.update({
+          where: { id: doc.id },
+          data: {
+            detectedTopic: analysis.primaryTopic,
+            topicConfidence: analysis.confidence,
+          },
+        })
+
+        // Store validation row linking session and document
+        await prisma.sessionDocumentValidation.create({
+          data: {
+            sessionId,
+            documentId: doc.id,
+            selectedTopic: session?.topic ?? '',
+            primaryTopic: analysis.primaryTopic,
+            coveredTopics: analysis.coveredTopics,
+            confidence: analysis.confidence,
+            coversSelected: analysis.coversSelected,
+            evidence: analysis.evidence,
+          },
+        })
+
         // Chunk the text
         const chunks = chunkText(text)
 
@@ -59,6 +87,9 @@ export async function POST(request: NextRequest) {
         const chunkTexts = chunks.map((c) => c.content)
         const embeddings = await generateEmbeddings(chunkTexts)
 
+        // Append covered topics to chunk metadata (optional for RAG boosts)
+        const metadataExtra = { coveredTopics: analysis.coveredTopics }
+
         // Store in vector database
         const chunksWithEmbeddings = chunks.map((chunk, i) => ({
           content: chunk.content,
@@ -68,6 +99,7 @@ export async function POST(request: NextRequest) {
             ...chunk.metadata,
             sessionId,
             fileName: doc.fileName,
+            ...metadataExtra,
           },
         }))
 

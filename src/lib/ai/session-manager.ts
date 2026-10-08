@@ -8,11 +8,15 @@ import {
   CONTEXT_INJECTION_TEMPLATE,
   INITIAL_GREETING,
 } from './prompts'
-import { generateWithFallback } from './provider'
+import { generateWithFallback, removeReasoning } from './provider'
 
 export interface ConversationMessage {
   role: 'user' | 'assistant'
   content: string
+}
+
+export const LANGUAGE_NAMES: Record<string, string> = {
+  en: 'English', hi: 'Hindi', mr: 'Marathi', te: 'Telugu', ta: 'Tamil',
 }
 
 /**
@@ -26,7 +30,7 @@ export async function getSessionHistory(sessionId: string): Promise<Conversation
 
   return messages.map((m) => ({
     role: m.role === 'user' ? 'user' as const : 'assistant' as const,
-    content: m.content,
+    content: m.role === 'user' ? m.content : removeReasoning(m.content),
   }))
 }
 
@@ -46,7 +50,8 @@ export async function getCurrentTurnNumber(sessionId: string): Promise<number> {
 export async function determineMode(
   userMessage: string,
   history: ConversationMessage[],
-  topic: string
+  topic: string,
+  language = 'en',
 ): Promise<'understanding' | 'socratic'> {
   const historyContext = history
     .slice(-6)
@@ -59,6 +64,8 @@ Topic: ${topic}
 
 Recent conversation:
 ${historyContext}
+
+The required response language is ${LANGUAGE_NAMES[language] || 'English'}. Classify silently; do not produce a user-facing response.
 
 Latest user explanation:
 ${userMessage}`
@@ -85,9 +92,14 @@ export async function buildSystemPrompt(
   mode: 'understanding' | 'socratic',
   topic: string,
   sessionId: string,
-  userMessage: string
+  userMessage: string,
+  options?: { language?: string; imageDescription?: string }
 ): Promise<string> {
   let systemPrompt = BASE_PERSONA + '\n\n'
+
+  const languageNames: Record<string, string> = { en: 'English', hi: 'Hindi', mr: 'Marathi', te: 'Telugu', ta: 'Tamil' }
+  const language = options?.language || 'en'
+  systemPrompt += `Respond consistently and only in ${languageNames[language] || 'English'}. Preserve technical terms in English when useful. Do not switch languages unless asked. This language rule applies to every response.\n\n`
 
   // Add mode-specific instructions
   systemPrompt += mode === 'understanding' ? UNDERSTANDING_MODE : SOCRATIC_MODE
@@ -106,14 +118,24 @@ export async function buildSystemPrompt(
     // Continue without RAG context
   }
 
+  if (options?.imageDescription) {
+    systemPrompt += `Use this attached-image evidence when responding:\n---IMAGE EVIDENCE---\n${options.imageDescription}\n---END IMAGE EVIDENCE---\n\n`
+  }
+
   return systemPrompt
 }
 
 /**
  * Generate the initial greeting for a new session
  */
-export function getInitialGreeting(topic: string): string {
-  return INITIAL_GREETING.replace(/{topic}/g, topic)
+export function getInitialGreeting(topic: string, language = 'en'): string {
+  const greetings: Record<string, string> = {
+    hi: `अरे! मैं ${topic} को समझने की कोशिश कर रहा हूँ। क्या तुम मुझे इसे अपने शब्दों में समझा सकते हो?`,
+    mr: `अरे! मला ${topic} समजून घेण्याचा प्रयत्न करायचा आहे. तू मला ते तुझ्या शब्दांत समजावून सांगशील का?`,
+    te: `హాయ్! నేను ${topic} అర్థం చేసుకోవడానికి ప్రయత్నిస్తున్నాను. దీన్ని నీ మాటల్లో నాకు వివరిస్తావా?`,
+    ta: `வணக்கம்! நான் ${topic} பற்றி புரிந்துகொள்ள முயற்சிக்கிறேன். இதை உன் சொந்த வார்த்தைகளில் விளக்குவாயா?`,
+  }
+  return (greetings[language] || INITIAL_GREETING).replace(/{topic}/g, topic)
 }
 
 /**

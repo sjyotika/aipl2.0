@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { prisma } from '@/lib/db'
 import { redirect } from 'next/navigation'
 import SessionReportClient from '@/components/dashboard/session-report-client'
-import type { EvaluationReport } from '@/lib/evaluation/schema'
+import { EvaluationReportSchema, type EvaluationReport } from '@/lib/evaluation/schema'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,7 +28,12 @@ export default async function SessionReportPage({
     redirect('/dashboard')
   }
 
-  const report = session.evaluationReport as unknown as EvaluationReport | null
+  const parsedReport = session.evaluationReport
+    ? EvaluationReportSchema.safeParse(session.evaluationReport)
+    : null
+  const report: EvaluationReport | null = parsedReport?.success
+    ? parsedReport.data
+    : null
 
   return (
     <SessionReportClient

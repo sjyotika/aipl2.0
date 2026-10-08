@@ -1,7 +1,7 @@
-const HF_API_URL = 'https://router.huggingface.co/hf-inference/models/BAAI/bge-small-en-v1.5/pipeline/feature-extraction'
+const HF_API_URL = 'https://router.huggingface.co/hf-inference/models/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/pipeline/feature-extraction'
 
 /**
- * Generate embeddings using Hugging Face Inference API (BAAI/bge-small-en-v1.5)
+ * Generate multilingual embeddings using Hugging Face Inference API.
  * Produces 384-dimensional vectors
  */
 export async function generateEmbeddings(texts: string[]): Promise<number[][]> {

@@ -3,12 +3,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import {
-  Send,
-  Loader2,
   Square,
   Flag,
   Clock,
@@ -19,7 +16,9 @@ import {
   Mic,
   MicOff,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn } from '@/lib/utils';
+import { useLanguage } from '@/context/LanguageContext';
+import ExplainInput from '@/components/ExplainInput';
 
 interface Message {
   id: string
@@ -41,9 +40,9 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
   const [elapsedTime, setElapsedTime] = useState(0)
   const [isListening, setIsListening] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const router = useRouter()
   const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const { language } = useLanguage();
 
   // Timer
   useEffect(() => {
@@ -80,8 +79,7 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
       }
     }
     startSession()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [sessionId])
 
   // Voice input setup
   const finalTranscriptRef = useRef('')
@@ -93,7 +91,7 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
       const recognition = new SpeechRecognition()
       recognition.continuous = true
       recognition.interimResults = true
-      recognition.lang = 'en-US'
+      recognition.lang = ({ en: 'en-US', hi: 'hi-IN', mr: 'mr-IN', te: 'te-IN', ta: 'ta-IN' } as Record<string, string>)[language] || 'en-US'
 
       recognition.onresult = (event: SpeechRecognitionEvent) => {
         let finalText = ''
@@ -115,10 +113,7 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
         interimRef.current = interimText
 
         // Update input: base text + all finalized speech + current interim preview
-        setInput((prev) => {
-          // Find where speech text starts (everything before the first speech input)
-          const baseText = prev.substring(0, prev.length - (interimRef.current.length || 0))
-          // Rebuild: whatever was typed before + finalized speech + live interim
+        setInput(() => {
           return finalTranscriptRef.current + interimText
         })
       }
@@ -135,7 +130,7 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
 
       recognitionRef.current = recognition
     }
-  }, [])
+  }, [language])
 
   function toggleVoice() {
     if (!recognitionRef.current) {
@@ -158,87 +153,94 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
     }
   }
 
-  async function sendMessage() {
-    if (!input.trim() || isLoading) return
+  // New submit handler integrating language and optional image
+  const handleExplainSubmit = async (text: string, imageUrl?: string) => {
+    if (!text.trim() || isLoading) return;
 
     // Stop voice if active
     if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop()
-      setIsListening(false)
+      recognitionRef.current.stop();
+      setIsListening(false);
     }
 
-    const userMessage = input.trim()
-    setInput('')
-    // Reset speech tracking for next mic session
-    finalTranscriptRef.current = ''
-    interimRef.current = ''
-    setIsLoading(true)
+    // Reset speech tracking
+    finalTranscriptRef.current = '';
+    interimRef.current = '';
+
+    setIsLoading(true);
 
     const userMsg: Message = {
       id: `user-${Date.now()}`,
       role: 'user',
-      content: userMessage,
-    }
-    setMessages((prev) => [...prev, userMsg])
+      content: text.trim(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, message: userMessage }),
-      })
+        body: JSON.stringify({
+          sessionId,
+          message: text.trim(),
+          language,
+          imageUrl,
+        }),
+      });
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}))
-        toast.error(errorData.error || 'Failed to send message')
-        setMessages((prev) => prev.slice(0, -1)) // Remove user message on error
-        return
+        const errorData = await res.json().catch(() => ({}));
+        toast.error(errorData.error || 'Failed to send message');
+        setMessages((prev) => prev.slice(0, -1)); // Remove user message on error
+        return;
       }
 
-      const reader = res.body?.getReader()
-      if (!reader) return
+      const reader = res.body?.getReader();
+      if (!reader) return;
 
-      const decoder = new TextDecoder()
-      let aiContent = ''
-      let mode: 'understanding' | 'socratic' | null = null
+      const decoder = new TextDecoder();
+      let aiContent = '';
+      let mode: 'understanding' | 'socratic' | null = null;
+      let streamError = false;
 
-      const aiMsgId = `ai-${Date.now()}`
+      const aiMsgId = `ai-${Date.now()}`;
       setMessages((prev) => [
         ...prev,
-        { id: aiMsgId, role: 'ai', content: '', mode: null }
-      ])
+        { id: aiMsgId, role: 'ai', content: '', mode: null },
+      ]);
 
       while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        const chunkString = decoder.decode(value, { stream: true })
-        const lines = chunkString.split('\n').filter(Boolean)
-
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunkString = decoder.decode(value, { stream: true });
+        const lines = chunkString.split('\n').filter(Boolean);
         for (const line of lines) {
           try {
-            const data = JSON.parse(line)
+            const data = JSON.parse(line);
             if (data.error) {
-              toast.error(data.error)
+              streamError = true;
+              toast.error(data.error);
             } else if (data.chunk) {
-              aiContent += data.chunk
+              aiContent += data.chunk;
             } else if (data.mode) {
-              mode = data.mode
+              mode = data.mode;
             }
-          } catch (e) {
-            // Ignore parse errors from split chunks
+          } catch {
+            // ignore parse errors
           }
         }
-
         setMessages((prev) =>
           prev.map((m) => (m.id === aiMsgId ? { ...m, content: aiContent, mode } : m))
-        )
+        );
+      }
+      if (streamError) {
+        setMessages((prev) => prev.filter((message) => message.id !== aiMsgId));
       }
     } catch {
-      toast.error('Failed to send message')
-      setMessages((prev) => prev.slice(0, -1)) // Remove user message on error
+      toast.error('Failed to send message');
+      setMessages((prev) => prev.slice(0, -1));
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
   }
 
@@ -276,13 +278,6 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
       toast.error('Failed to end session')
     } finally {
       setIsLoading(false)
-    }
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendMessage()
     }
   }
 
@@ -358,14 +353,12 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
               </div>
             )}
 
-            <div
-              className={cn(
-                'max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed',
-                msg.role === 'user'
-                  ? 'bg-primary text-primary-foreground rounded-br-md'
-                  : 'bg-muted rounded-bl-md'
-              )}
-            >
+            <div className={cn(
+              'max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed',
+              msg.role === 'user'
+                ? 'bg-primary text-primary-foreground rounded-br-md'
+                : 'bg-muted rounded-bl-md'
+                            )}>
               {msg.mode && (
                 <div className="mb-1.5">
                   <Badge
@@ -377,6 +370,7 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
                         : 'border-warning/30 text-warning bg-warning/5'
                     )}
                   >
+  
                     {msg.mode === 'understanding' ? (
                       <Lightbulb className="size-2.5" />
                     ) : (
@@ -420,7 +414,7 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
       {/* Input Area */}
       {!sessionEnded && (
         <div className="border-t border-border/50 bg-background/80 backdrop-blur-md px-4 lg:px-6 py-3">
-          <div className="flex items-end gap-2 max-w-4xl mx-auto">
+          <div className="flex w-full items-end gap-2 max-w-4xl mx-auto">
             <Button
               variant="ghost"
               size="icon"
@@ -437,29 +431,7 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
               )}
             </Button>
 
-            <Textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Explain the concept to your peer..."
-              className="min-h-[44px] max-h-[160px] resize-none text-sm"
-              rows={1}
-              disabled={isLoading}
-            />
-
-            <Button
-              onClick={sendMessage}
-              disabled={!input.trim() || isLoading}
-              size="icon"
-              className="shrink-0 mb-0.5 bg-gradient-brand hover:opacity-90 transition-opacity"
-            >
-              {isLoading ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Send className="size-4" />
-              )}
-            </Button>
+            <ExplainInput value={input} onChange={setInput} onSubmit={handleExplainSubmit} sessionId={sessionId} />
           </div>
         </div>
       )}

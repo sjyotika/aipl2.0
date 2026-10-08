@@ -1,16 +1,17 @@
 import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { prisma } from '@/lib/db'
-import { streamWithFallback } from '@/lib/ai/provider'
+import { removeReasoning, streamWithFallback } from '@/lib/ai/provider'
 import {
   getSessionHistory,
   getCurrentTurnNumber,
   determineMode,
   buildSystemPrompt,
   saveMessage,
-  getInitialGreeting,
+  getInitialGreeting, LANGUAGE_NAMES,
 } from '@/lib/ai/session-manager'
 import { SESSION_END_PROMPT, BASE_PERSONA } from '@/lib/ai/prompts'
+import { describeImage } from '@/lib/services/visionService'
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { message, sessionId, action } = await request.json()
+    const { message, sessionId, action, language, imageUrl } = await request.json();
 
     // Verify session belongs to user
     const session = await prisma.session.findFirst({
@@ -32,9 +33,19 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Session not found' }, { status: 404 })
     }
 
+    if (language && !['en', 'hi', 'mr', 'te', 'ta'].includes(language)) {
+      return Response.json({ error: 'Unsupported language' }, { status: 400 })
+    }
+    if (imageUrl && (typeof imageUrl !== 'string' || !imageUrl.startsWith(`${user.id}/`))) {
+      return Response.json({ error: 'Invalid image reference' }, { status: 400 })
+    }
+    if (language || imageUrl) {
+      await prisma.session.update({ where: { id: sessionId }, data: { ...(language && { language }), ...(imageUrl && { imageUrl }) } })
+    }
+
     // Handle initial greeting
     if (action === 'start') {
-      const greeting = getInitialGreeting(session.topic)
+      const greeting = getInitialGreeting(session.topic, language || session.language || 'en')
       const turnNumber = await getCurrentTurnNumber(sessionId)
       await saveMessage(sessionId, 'ai', greeting, null, turnNumber)
       return Response.json({ message: greeting, mode: null })
@@ -51,7 +62,7 @@ export async function POST(request: NextRequest) {
       // Generate farewell
       const history = await getSessionHistory(sessionId)
       const result = await streamWithFallback({
-        system: BASE_PERSONA + '\n\n' + SESSION_END_PROMPT,
+        system: BASE_PERSONA + `\n\nRespond only in ${LANGUAGE_NAMES[language || session.language || 'en'] || 'English'} and preserve technical terms when useful.\n\n` + SESSION_END_PROMPT,
         messages: [...history, { role: 'user', content: 'I want to end our session now.' }],
         maxOutputTokens: 256,
       })
@@ -61,6 +72,7 @@ export async function POST(request: NextRequest) {
       for await (const chunk of stream) {
         farewell += chunk
       }
+      farewell = removeReasoning(farewell)
 
       const turnNumber = await getCurrentTurnNumber(sessionId)
       await saveMessage(sessionId, 'ai', farewell, null, turnNumber)
@@ -75,8 +87,11 @@ export async function POST(request: NextRequest) {
 
         fetch(`${baseUrl}/api/evaluate`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId }),
+          headers: {
+            'Content-Type': 'application/json',
+            cookie: request.headers.get('cookie') || '',
+          },
+          body: JSON.stringify({ sessionId, language: language || session.language, imageUrl: imageUrl || session.imageUrl })
         }).catch(console.error)
       } catch {}
 
@@ -96,27 +111,40 @@ export async function POST(request: NextRequest) {
     const history = await getSessionHistory(sessionId)
 
     // Start determineMode in parallel
-    const modePromise = determineMode(message, history, session.topic)
+    const modePromise = determineMode(message, history, session.topic, language || session.language || 'en')
 
     // Build system prompt with RAG context
-    const systemPrompt = await buildSystemPrompt('understanding', session.topic, sessionId, message) // Pass a default mode since BASE_PERSONA handles both dynamically
+    let imageDescription = ''
+    if (imageUrl) {
+      try { imageDescription = await describeImage(imageUrl, 'Analyze this attached educational diagram as evidence for the student explanation.') } catch { imageDescription = '' }
+    }
+    const systemPrompt = await buildSystemPrompt('understanding', session.topic, sessionId, message, { language: language || session.language || 'en', imageDescription })
 
     // Stream AI response
     const result = await streamWithFallback({
       system: systemPrompt,
       messages: history,
-      maxOutputTokens: 512,
+      maxOutputTokens: 1024,
     })
 
     // Return a custom stream that yields JSON lines
     const stream = new ReadableStream({
       async start(controller) {
         let fullResponse = ''
-        
-        // Stream text chunks
-        for await (const chunk of result.textStream) {
-          fullResponse += chunk
-          controller.enqueue(new TextEncoder().encode(JSON.stringify({ chunk }) + '\n'))
+        try {
+          for await (const chunk of result.textStream) fullResponse += chunk
+          fullResponse = removeReasoning(fullResponse)
+          if (!fullResponse) {
+            controller.enqueue(new TextEncoder().encode(JSON.stringify({ error: 'The AI returned no visible response. Please try again.' }) + '\n'))
+            controller.close()
+            return
+          }
+          controller.enqueue(new TextEncoder().encode(JSON.stringify({ chunk: fullResponse }) + '\n'))
+        } catch (error) {
+          console.error('Chat stream failed:', error)
+          controller.enqueue(new TextEncoder().encode(JSON.stringify({ error: 'AI is temporarily unavailable. Please try again shortly.' }) + '\n'))
+          controller.close()
+          return
         }
 
         // Wait for mode detection to finish (it usually finishes before the stream)

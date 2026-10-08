@@ -24,6 +24,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { LanguageProvider } from '@/context/LanguageContext'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -95,7 +96,8 @@ export default function AppLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <LanguageProvider>
+      <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:border-r lg:border-border/50 bg-sidebar">
         <Sidebar />
@@ -165,6 +167,7 @@ export default function AppLayout({
           {children}
         </main>
       </div>
-    </div>
+      </div>
+    </LanguageProvider>
   )
 }
