@@ -16,6 +16,7 @@ export const EvaluationReportSchema = z.object({
   coverage_score: z.number().min(0).max(100),
   conceptual_gaps: z.array(z.string()),
   misconceptions: z.array(MisconceptionSchema),
+  common_topic_misconceptions: z.array(MisconceptionSchema).default([]),
   improvement_suggestions: z.array(z.string()),
   confidence_flag: z.boolean(),
   session_narrative: z.string(),

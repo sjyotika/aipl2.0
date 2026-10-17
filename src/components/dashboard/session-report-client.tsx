@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   Clock,
   Brain,
+  Download,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -204,10 +205,16 @@ export default function SessionReportClient({
           </div>
           <h1 className="text-2xl font-bold tracking-tight">{topic}</h1>
         </div>
-        <Button className="bg-gradient-brand hover:opacity-90 gap-2" render={<Link href="/session/new" />}>
-            <MessageSquarePlus className="size-4" />
-            New Session
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" className="gap-2" render={<a href={`/api/sessions/${sessionId}/report/pdf`} download />}>
+            <Download className="size-4" />
+            Download PDF
+          </Button>
+          <Button className="bg-gradient-brand hover:opacity-90 gap-2" render={<Link href="/session/new" />}>
+              <MessageSquarePlus className="size-4" />
+              New Session
+          </Button>
+        </div>
       </div>
 
       {/* Overall Score */}

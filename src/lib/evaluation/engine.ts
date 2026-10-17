@@ -14,6 +14,7 @@ You MUST respond with ONLY a valid JSON object matching this exact schema:
   "coverage_score": <number 0-100>,
   "conceptual_gaps": [<string descriptions of concepts the student missed or didn't address>],
   "misconceptions": [{"misconception": "<what they got wrong>", "correction": "<what's actually correct>"}],
+  "common_topic_misconceptions": [{"misconception": "<a common misconception about this topic>", "correction": "<the correct understanding>"}],
   "improvement_suggestions": [<specific actionable suggestions>],
   "confidence_flag": <boolean - true if the student showed confidence, false if they seemed unsure>,
   "session_narrative": "<2-3 sentence narrative describing how the student's explanation evolved during the session>"
@@ -70,7 +71,7 @@ export async function evaluateSession(sessionId: string, options?: { language?: 
     .join('\n\n');
 
   // Fetch validated reference chunks for this session (only from documents with coversSelected = true)
-  const { data: validDocs } = await prisma.sessionDocumentValidation.findMany({
+  const validDocs = await prisma.sessionDocumentValidation.findMany({
     where: { sessionId, coversSelected: true },
     select: { documentId: true },
   })
@@ -107,14 +108,14 @@ export async function evaluateSession(sessionId: string, options?: { language?: 
       cleaned = cleaned.replace(/^```json?\n?/, '').replace(/\n?```$/, '')
     }
     parsed = JSON.parse(cleaned)
-  } catch (e) {
+  } catch {
     console.error('Failed to parse evaluation JSON:', result)
     throw new Error('Evaluation produced invalid JSON')
   }
 
   // Enrich parsed data with additional computed fields
   if (typeof parsed === 'object' && parsed !== null) {
-    const obj = parsed as any
+    const obj = parsed as Record<string, unknown>
     // Mode transitions
     obj.mode_transitions = session.messages
       .filter((message) => message.mode)
@@ -133,7 +134,7 @@ export async function evaluateSession(sessionId: string, options?: { language?: 
     obj.reference_valid = referenceValid
 
     // Determine answer_topic_match conceptually (simple normalized inclusion as fallback)
-    const answerTopic = (obj.answer_topic || '').toString().toLowerCase()
+    const answerTopic = typeof obj.answer_topic === 'string' ? obj.answer_topic.toLowerCase() : ''
     const sessionTopic = session.topic.toString().toLowerCase()
     const match = answerTopic.includes(sessionTopic) || sessionTopic.includes(answerTopic)
     obj.answer_topic_match = match

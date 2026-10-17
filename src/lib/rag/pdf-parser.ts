@@ -1,6 +1,27 @@
 import { PDFParse, VerbosityLevel } from 'pdf-parse'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+let workerConfigured = false
+
+function configurePdfWorker() {
+  if (!workerConfigured) {
+    const workerPath = path.join(
+      process.cwd(),
+      'node_modules',
+      'pdf-parse',
+      'dist',
+      'worker',
+      'pdf.worker.mjs'
+    )
+    PDFParse.setWorker(pathToFileURL(workerPath).href)
+    workerConfigured = true
+  }
+}
 
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
+  configurePdfWorker()
+
   const pdfData = new Uint8Array(buffer)
   const parser = new PDFParse({
     data: pdfData,
@@ -25,4 +46,3 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
 
   return text.trim()
 }
-

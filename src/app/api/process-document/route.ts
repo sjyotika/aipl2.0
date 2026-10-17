@@ -17,14 +17,36 @@ export async function POST(request: NextRequest) {
 
     const { sessionId } = await request.json()
 
+    const session = await prisma.session.findFirst({
+      where: { id: sessionId, userId: user.id },
+      select: { topic: true },
+    })
+
+    if (!session) {
+      return Response.json({ error: 'Session not found' }, { status: 404 })
+    }
+
     // Get documents for this session
     const documents = await prisma.document.findMany({
       where: { sessionId, processed: false },
     })
 
     if (documents.length === 0) {
-      return Response.json({ message: 'No documents to process' })
+      return Response.json({
+        message: 'No documents to process',
+        relevant: true,
+        validations: [],
+      })
     }
+
+    const validations: Array<{
+      documentId: string
+      coversSelected: boolean
+      primaryTopic: string
+      confidence: number
+      evidence: string
+    }> = []
+    const processingErrors: string[] = []
 
     for (const doc of documents) {
       try {
@@ -36,6 +58,7 @@ export async function POST(request: NextRequest) {
 
         if (downloadError || !fileData) {
           console.error('Download error:', downloadError)
+          processingErrors.push(`Could not download ${doc.fileName}.`)
           continue
         }
 
@@ -45,13 +68,14 @@ export async function POST(request: NextRequest) {
 
         if (!text || text.length === 0) {
           console.error('No text extracted from PDF')
+          processingErrors.push(`Could not read text from ${doc.fileName}.`)
           continue
         }
 
         // Analyze document content for topic coverage
-        const { prisma: prismaImport } = await import('@/lib/db')
-        const session = await prismaImport.session.findUnique({ where: { id: sessionId }, select: { topic: true } })
-        const analysis = await import('@/lib/rag/documentAnalyzer').then(m => m.analyzeDocumentContent(text, session?.topic ?? ''))
+        const analysis = await import('@/lib/rag/documentAnalyzer').then(m =>
+          m.analyzeDocumentContent(text, session.topic)
+        )
 
         // Update Document with detected topic and confidence
         await prisma.document.update({
@@ -67,7 +91,7 @@ export async function POST(request: NextRequest) {
           data: {
             sessionId,
             documentId: doc.id,
-            selectedTopic: session?.topic ?? '',
+            selectedTopic: session.topic,
             primaryTopic: analysis.primaryTopic,
             coveredTopics: analysis.coveredTopics,
             confidence: analysis.confidence,
@@ -75,6 +99,19 @@ export async function POST(request: NextRequest) {
             evidence: analysis.evidence,
           },
         })
+
+        validations.push({
+          documentId: doc.id,
+          coversSelected: analysis.coversSelected,
+          primaryTopic: analysis.primaryTopic,
+          confidence: analysis.confidence,
+          evidence: analysis.evidence,
+        })
+
+        // Do not add unrelated documents to the RAG index.
+        if (!analysis.coversSelected) {
+          continue
+        }
 
         // Chunk the text
         const chunks = chunkText(text)
@@ -112,10 +149,29 @@ export async function POST(request: NextRequest) {
         })
       } catch (error) {
         console.error(`Failed to process document ${doc.id}:`, error)
+        const message = error instanceof Error ? error.message : 'Unknown processing error'
+        processingErrors.push(`Could not validate ${doc.fileName}: ${message}`)
       }
     }
 
-    return Response.json({ success: true })
+    if (processingErrors.length > 0 || validations.length !== documents.length) {
+      return Response.json(
+        {
+          error: processingErrors[0] || 'Could not validate the uploaded PDF.',
+          relevant: false,
+          validations,
+        },
+        { status: 422 }
+      )
+    }
+
+    const invalidDocument = validations.find((validation) => !validation.coversSelected)
+
+    return Response.json({
+      success: true,
+      relevant: !invalidDocument,
+      validations,
+    })
   } catch (error) {
     console.error('Document processing failed:', error)
     return Response.json({ error: 'Internal server error' }, { status: 500 })

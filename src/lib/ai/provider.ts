@@ -19,7 +19,7 @@ export function getPrimaryModel(): LanguageModel {
   const groq = createGroq({
     apiKey: process.env.GROQ_API_KEY,
   })
-  return groq(process.env.GROQ_MODEL || 'qwen/qwen3.6-27b')
+  return groq(process.env.GROQ_MODEL || 'qwen/qwen3.8-27b')
 }
 
 /** Get the Gemini fallback model. */
@@ -27,7 +27,7 @@ export function getFallbackModel(): LanguageModel {
   const google = createGoogleGenerativeAI({
     apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
   })
-  return google(process.env.GEMINI_MODEL || 'gemini-3.6-flash')
+  return google(process.env.GEMINI_MODEL || 'gemini-3.8-flash')
 }
 
 /**

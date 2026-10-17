@@ -1,14 +1,6 @@
 import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { prisma } from '@/lib/db'
-
-function getSupabaseAdmin() {
-  return createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,29 +38,11 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Session not found' }, { status: 404 })
     }
 
-    // Use admin client for storage (bypasses RLS policies)
-    const admin = getSupabaseAdmin()
-
-    // Ensure the 'documents' bucket exists
-    const { data: buckets } = await admin.storage.listBuckets()
-    const bucketExists = buckets?.some((b) => b.name === 'documents')
-    if (!bucketExists) {
-      const { error: bucketError } = await admin.storage.createBucket('documents', {
-        public: true,
-        fileSizeLimit: 10 * 1024 * 1024, // 10MB
-        allowedMimeTypes: ['application/pdf'],
-      })
-      if (bucketError) {
-        console.error('Failed to create storage bucket:', bucketError)
-        return Response.json({ error: 'Storage not configured' }, { status: 500 })
-      }
-    }
-
     // Upload to Supabase Storage
     const fileName = `${user.id}/${sessionId}/${file.name}`
     const buffer = Buffer.from(await file.arrayBuffer())
 
-    const { data: uploadData, error: uploadError } = await admin.storage
+    const { error: uploadError } = await supabase.storage
       .from('documents')
       .upload(fileName, buffer, {
         contentType: 'application/pdf',
@@ -84,7 +58,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get public URL
-    const { data: urlData } = admin.storage
+    const { data: urlData } = supabase.storage
       .from('documents')
       .getPublicUrl(fileName)
 
@@ -104,4 +78,3 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
-

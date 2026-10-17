@@ -17,6 +17,7 @@ import {
   Loader2,
   BookOpen,
   Sparkles,
+  AlertTriangle,
 } from 'lucide-react'
 import LanguageSelector from '@/components/LanguageSelector'
 import { useLanguage } from '@/context/LanguageContext'
@@ -28,6 +29,7 @@ export default function NewSessionPage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [isCreating, setIsCreating] = useState(false)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const router = useRouter()
   const { language } = useLanguage()
 
@@ -43,6 +45,7 @@ export default function NewSessionPage() {
         return
       }
       setFile(pdfFile)
+      setUploadError(null)
     }
   }, [])
 
@@ -99,7 +102,11 @@ export default function NewSessionPage() {
         })
 
         if (!uploadRes.ok) {
-          toast.error('PDF upload failed, but session was created.')
+          const errorData = await uploadRes.json().catch(() => null)
+          setUploadError(errorData?.error || 'PDF upload failed.')
+          setUploadProgress(0)
+          setIsCreating(false)
+          return
         } else {
           setUploadProgress(60)
 
@@ -111,8 +118,29 @@ export default function NewSessionPage() {
           })
 
           if (!processRes.ok) {
-            toast.error('Document processing failed, continuing without RAG context.')
+            const errorData = await processRes.json().catch(() => null)
+            setUploadError(errorData?.error || 'Document processing failed.')
+            setUploadProgress(0)
+            setIsCreating(false)
+            return
           }
+
+          const processData = await processRes.json()
+          if (!processData.relevant) {
+            const validation = processData.validations?.find(
+              (item: { coversSelected: boolean }) => !item.coversSelected
+            )
+            toast.warning(
+              validation?.evidence
+                ? `Please add a relevant PDF for "${topic.trim()}". ${validation.evidence}`
+                : 'Please add a relevant PDF.'
+            )
+            setUploadError(null)
+            setUploadProgress(0)
+            setIsCreating(false)
+            return
+          }
+
           setUploadProgress(100)
         }
       }
@@ -215,13 +243,26 @@ export default function NewSessionPage() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => setFile(null)}
+                  onClick={() => {
+                    setFile(null)
+                    setUploadError(null)
+                  }}
                   className="text-muted-foreground hover:text-destructive"
                 >
                   <X className="size-4" />
                 </Button>
               </CardContent>
             </Card>
+          )}
+
+          {uploadError && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <p>{uploadError}</p>
+            </div>
           )}
 
           {isCreating && file && uploadProgress > 0 && uploadProgress < 100 && (

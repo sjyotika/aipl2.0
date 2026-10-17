@@ -1,6 +1,16 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateQueryEmbedding } from './embeddings'
 
+interface ValidatedDocumentRow {
+  document_id: string
+}
+
+interface VectorSearchRow {
+  content: string
+  similarity: number
+  document_id: string
+}
+
 function getSupabaseAdmin() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -77,14 +87,16 @@ export async function searchSimilarChunks(
       .select('document_id')
       .eq('session_id', sessionId)
       .eq('covers_selected', true)
-    const validDocIds = (validDocs || []).map((row: any) => row.document_id)
+    const validDocIds = ((validDocs || []) as ValidatedDocumentRow[]).map(
+      (row) => row.document_id
+    )
 
     // Filter chunks to only those belonging to valid documents
-    const filteredData = (data || []).filter((row: any) =>
+    const filteredData = ((data || []) as VectorSearchRow[]).filter((row) =>
       row.similarity >= 0.6 && validDocIds.includes(row.document_id)
     )
 
-    return filteredData.map((row: { content: string; similarity: number }) => ({
+    return filteredData.map((row) => ({
       content: row.content,
       similarity: row.similarity,
     }))

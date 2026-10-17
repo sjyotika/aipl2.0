@@ -7,8 +7,16 @@ import { Brain, ArrowRight, BookOpen, MessageSquare, BarChart3 } from 'lucide-re
 export const dynamic = 'force-dynamic'
 
 export default async function HomePage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const isSupabaseConfigured = Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  )
+  let user = null
+  if (isSupabaseConfigured) {
+    const supabase = await createClient()
+    const result = await supabase.auth.getUser()
+    user = result.data.user
+  }
 
   if (user) {
     redirect('/dashboard')
