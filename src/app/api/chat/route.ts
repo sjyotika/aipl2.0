@@ -45,7 +45,11 @@ export async function POST(request: NextRequest) {
 
     // Handle initial greeting
     if (action === 'start') {
-      const greeting = getInitialGreeting(session.topic, language || session.language || 'en')
+      const greeting = getInitialGreeting(
+        session.topic,
+        language || session.language || 'en',
+        session.interviewMode
+      )
       const turnNumber = await getCurrentTurnNumber(sessionId)
       await saveMessage(sessionId, 'ai', greeting, null, turnNumber)
       return Response.json({ message: greeting, mode: null })
@@ -111,14 +115,29 @@ export async function POST(request: NextRequest) {
     const history = await getSessionHistory(sessionId)
 
     // Start determineMode in parallel
-    const modePromise = determineMode(message, history, session.topic, language || session.language || 'en')
+    // Interview modes use a fixed conversation strategy, avoiding an extra AI
+    // classification request on every turn.
+    const modePromise = session.interviewMode === 'normal'
+      ? determineMode(message, history, session.topic, language || session.language || 'en')
+      : Promise.resolve<'socratic'>('socratic')
 
     // Build system prompt with RAG context
     let imageDescription = ''
     if (imageUrl) {
       try { imageDescription = await describeImage(imageUrl, 'Analyze this attached educational diagram as evidence for the student explanation.') } catch { imageDescription = '' }
     }
-    const systemPrompt = await buildSystemPrompt('understanding', session.topic, sessionId, message, { language: language || session.language || 'en', imageDescription })
+    const systemPrompt = await buildSystemPrompt(
+      'understanding',
+      session.topic,
+      sessionId,
+      message,
+      {
+        language: language || session.language || 'en',
+        imageDescription,
+        interviewMode: session.interviewMode,
+        companyName: session.companyName || undefined,
+      }
+    )
 
     // Stream AI response
     const result = await streamWithFallback({

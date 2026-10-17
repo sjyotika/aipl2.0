@@ -7,8 +7,10 @@ import {
   MODE_SELECTION_PROMPT,
   CONTEXT_INJECTION_TEMPLATE,
   INITIAL_GREETING,
+  INTERVIEW_MODE_PROMPTS,
 } from './prompts'
 import { generateWithFallback, removeReasoning } from './provider'
+import type { InterviewMode } from '@/lib/interview/modes'
 
 export interface ConversationMessage {
   role: 'user' | 'assistant'
@@ -93,17 +95,25 @@ export async function buildSystemPrompt(
   topic: string,
   sessionId: string,
   userMessage: string,
-  options?: { language?: string; imageDescription?: string }
+  options?: { language?: string; imageDescription?: string; interviewMode?: InterviewMode; companyName?: string }
 ): Promise<string> {
   let systemPrompt = BASE_PERSONA + '\n\n'
 
   const languageNames: Record<string, string> = { en: 'English', hi: 'Hindi', mr: 'Marathi', te: 'Telugu', ta: 'Tamil' }
   const language = options?.language || 'en'
   systemPrompt += `Respond consistently and only in ${languageNames[language] || 'English'}. Preserve technical terms in English when useful. Do not switch languages unless asked. This language rule applies to every response.\n\n`
-
-  // Add mode-specific instructions
-  systemPrompt += mode === 'understanding' ? UNDERSTANDING_MODE : SOCRATIC_MODE
+  // Interview instructions take precedence over the teaching-session modes.
+  systemPrompt += options?.interviewMode
+    && options.interviewMode !== 'normal'
+    ? INTERVIEW_MODE_PROMPTS[options.interviewMode]
+    : mode === 'understanding'
+      ? UNDERSTANDING_MODE
+      : SOCRATIC_MODE
   systemPrompt += '\n\n'
+
+  if (options?.companyName && options.interviewMode && options.interviewMode !== 'normal') {
+    systemPrompt += `Company context: ${options.companyName}. Tailor scenarios to this company, but do not claim confidential or unverifiable company-specific facts.\n\n`
+  }
 
   // Add RAG context if available
   try {
@@ -128,14 +138,22 @@ export async function buildSystemPrompt(
 /**
  * Generate the initial greeting for a new session
  */
-export function getInitialGreeting(topic: string, language = 'en'): string {
+export function getInitialGreeting(topic: string, language = 'en', interviewMode: InterviewMode = 'technical'): string {
+  const modeGreeting = {
+    normal: INITIAL_GREETING.replace(/{topic}/g, topic),
+    technical: `Welcome to your technical interview on ${topic}. Start by explaining the core idea and how you would apply it.`,
+    managerial: `Welcome to your managerial interview. We will discuss ${topic} through leadership and decision-making scenarios. Tell me about a relevant situation you handled.`,
+    hr: `Welcome to your HR interview. We will explore your experience and approach to ${topic}. Tell me about a situation that shows how you work with others.`,
+  }[interviewMode]
   const greetings: Record<string, string> = {
     hi: `अरे! मैं ${topic} को समझने की कोशिश कर रहा हूँ। क्या तुम मुझे इसे अपने शब्दों में समझा सकते हो?`,
     mr: `अरे! मला ${topic} समजून घेण्याचा प्रयत्न करायचा आहे. तू मला ते तुझ्या शब्दांत समजावून सांगशील का?`,
     te: `హాయ్! నేను ${topic} అర్థం చేసుకోవడానికి ప్రయత్నిస్తున్నాను. దీన్ని నీ మాటల్లో నాకు వివరిస్తావా?`,
     ta: `வணக்கம்! நான் ${topic} பற்றி புரிந்துகொள்ள முயற்சிக்கிறேன். இதை உன் சொந்த வார்த்தைகளில் விளக்குவாயா?`,
   }
-  return (greetings[language] || INITIAL_GREETING).replace(/{topic}/g, topic)
+  return language === 'en' && interviewMode !== 'normal'
+    ? modeGreeting
+    : (greetings[language] || INITIAL_GREETING).replace(/{topic}/g, topic)
 }
 
 /**

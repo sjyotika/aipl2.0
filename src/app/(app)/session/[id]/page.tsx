@@ -32,5 +32,5 @@ export default async function SessionPage({
     redirect(`/session/${id}/report`)
   }
 
-  return <ChatInterface sessionId={id} topic={session.topic} />
+  return <ChatInterface sessionId={id} topic={session.topic} interviewMode={session.interviewMode} />
 }

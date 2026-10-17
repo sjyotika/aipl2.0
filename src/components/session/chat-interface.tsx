@@ -18,6 +18,8 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils';
 import { useLanguage } from '@/context/LanguageContext';
+import type { InterviewMode } from '@/lib/interview/modes'
+import { INTERVIEW_MODE_DETAILS } from '@/lib/interview/modes'
 import ExplainInput from '@/components/ExplainInput';
 
 interface Message {
@@ -30,9 +32,10 @@ interface Message {
 interface ChatInterfaceProps {
   sessionId: string
   topic: string
+  interviewMode: InterviewMode
 }
 
-export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) {
+export default function ChatInterface({ sessionId, topic, interviewMode }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -297,7 +300,9 @@ export default function ChatInterface({ sessionId, topic }: ChatInterfaceProps) 
           </div>
           <div>
             <h2 className="text-sm font-semibold">{topic}</h2>
-            <p className="text-xs text-muted-foreground">Teaching Session</p>
+            <p className="text-xs text-muted-foreground">
+              {INTERVIEW_MODE_DETAILS[interviewMode].label} Interview
+            </p>
           </div>
         </div>
 

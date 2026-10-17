@@ -22,9 +22,12 @@ import {
 import LanguageSelector from '@/components/LanguageSelector'
 import { useLanguage } from '@/context/LanguageContext'
 import ImageUpload from '@/components/ImageUpload'
+import { INTERVIEW_MODE_DETAILS, type InterviewMode } from '@/lib/interview/modes'
 
 export default function NewSessionPage() {
   const [topic, setTopic] = useState('')
+  const [interviewMode, setInterviewMode] = useState<InterviewMode>('normal')
+  const [companyName, setCompanyName] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [isCreating, setIsCreating] = useState(false)
@@ -69,7 +72,12 @@ export default function NewSessionPage() {
       const sessionRes = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: topic.trim(), language }),
+        body: JSON.stringify({
+          topic: topic.trim(),
+          language,
+          interviewMode,
+          companyName: companyName.trim() || undefined,
+        }),
       })
 
       if (!sessionRes.ok) {
@@ -186,6 +194,65 @@ export default function NewSessionPage() {
               autoFocus
             />
           </div>
+
+          <div className="space-y-3">
+            <Label className="text-sm font-medium">Normal</Label>
+            <button
+              type="button"
+              onClick={() => setInterviewMode('normal')}
+              className={`w-full rounded-xl border p-4 text-left transition-colors ${
+                interviewMode === 'normal'
+                  ? 'border-primary bg-primary/10 ring-1 ring-primary'
+                  : 'border-border hover:border-primary/50 hover:bg-muted/30'
+              }`}
+              aria-pressed={interviewMode === 'normal'}
+            >
+              <span className="block text-sm font-semibold">{INTERVIEW_MODE_DETAILS.normal.label}</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {INTERVIEW_MODE_DETAILS.normal.description}
+              </span>
+            </button>
+
+            <Label className="pt-2 text-sm font-medium">Interview mode</Label>
+            {(interviewMode === 'managerial' || interviewMode === 'hr') && (
+              <div className="space-y-2">
+                <Label htmlFor="company-name" className="text-sm font-medium">
+                  Company
+                </Label>
+                <Input
+                  id="company-name"
+                  value={companyName}
+                  onChange={(event) => setCompanyName(event.target.value)}
+                  placeholder="e.g., Google, Microsoft, Tata, Amazon"
+                  maxLength={100}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Questions will be tailored to this company&apos;s interview style and workplace scenarios.
+                </p>
+              </div>
+            )}
+            <div className="grid gap-3 sm:grid-cols-3">
+              {(Object.entries(INTERVIEW_MODE_DETAILS) as Array<[InterviewMode, (typeof INTERVIEW_MODE_DETAILS)[InterviewMode]]>)
+                .filter(([mode]) => mode !== 'normal')
+                .map(([mode, details]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setInterviewMode(mode)}
+                    className={`rounded-xl border p-4 text-left transition-colors ${
+                      interviewMode === mode
+                        ? 'border-primary bg-primary/10 ring-1 ring-primary'
+                        : 'border-border hover:border-primary/50 hover:bg-muted/30'
+                    }`}
+                    aria-pressed={interviewMode === mode}
+                  >
+                    <span className="block text-sm font-semibold">{details.label}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">{details.description}</span>
+                  </button>
+                )
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="space-y-3">
@@ -298,7 +365,7 @@ export default function NewSessionPage() {
             </>
           ) : (
             <>
-              Start Teaching
+              Start Interview
               <ArrowRight className="size-5" />
             </>
           )}

@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db'
 import { createClient } from '@/lib/supabase/server'
 import { EvaluationReportSchema } from '@/lib/evaluation/schema'
 import PDFDocument from 'pdfkit'
+import { INTERVIEW_MODE_DETAILS } from '@/lib/interview/modes'
 
 export const runtime = 'nodejs'
 
@@ -52,7 +53,7 @@ export async function GET(
 
   const session = await prisma.session.findFirst({
     where: { id, userId: user.id },
-    select: { topic: true, evaluationReport: true },
+    select: { topic: true, interviewMode: true, evaluationReport: true },
   })
 
   if (!session || !session.evaluationReport) {
@@ -76,7 +77,9 @@ export async function GET(
 
   document.fontSize(22).fillColor('#172554').text('Session Learning Report')
   document.moveDown(0.3)
-  document.fontSize(13).fillColor('#444444').text(`Topic: ${session.topic}`)
+  document.fontSize(13).fillColor('#444444')
+    .text(`Topic: ${session.topic}`)
+    .text(`Interview mode: ${INTERVIEW_MODE_DETAILS[session.interviewMode].label}`)
   document.moveDown(1)
 
   document.fontSize(15).fillColor('#172554').text('Session-specific results')

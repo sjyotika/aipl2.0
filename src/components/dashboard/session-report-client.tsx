@@ -23,6 +23,8 @@ import {
   Download,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { InterviewMode } from '@/lib/interview/modes'
+import { INTERVIEW_MODE_DETAILS } from '@/lib/interview/modes'
 
 function ScoreRing({ score, label, size = 120 }: { score: number; label: string; size?: number }) {
   const radius = (size - 12) / 2
@@ -112,12 +114,14 @@ function ScoreCard({
 interface SessionReportClientProps {
   sessionId: string
   topic: string
+  interviewMode: InterviewMode
   initialReport: EvaluationReport | null
 }
 
 export default function SessionReportClient({
   sessionId,
   topic,
+  interviewMode,
   initialReport,
 }: SessionReportClientProps) {
   const [report, setReport] = useState<EvaluationReport | null>(initialReport)
@@ -201,7 +205,7 @@ export default function SessionReportClient({
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <BarChart3 className="size-4" />
-            Session Report
+            {INTERVIEW_MODE_DETAILS[interviewMode].label} Interview Report
           </div>
           <h1 className="text-2xl font-bold tracking-tight">{topic}</h1>
         </div>

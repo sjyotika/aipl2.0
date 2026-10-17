@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { prisma } from '@/lib/db'
+import { isInterviewMode, type InterviewMode } from '@/lib/interview/modes'
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,7 +12,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { topic, language = 'en' } = await request.json()
+    const { topic, language = 'en', interviewMode = 'normal', companyName } = await request.json()
 
     if (!topic || typeof topic !== 'string' || topic.trim().length === 0) {
       return Response.json({ error: 'Topic is required' }, { status: 400 })
@@ -19,6 +20,16 @@ export async function POST(request: NextRequest) {
 
     if (!['en', 'hi', 'mr', 'te', 'ta'].includes(language)) {
       return Response.json({ error: 'Unsupported language' }, { status: 400 })
+    }
+    if (!isInterviewMode(interviewMode)) {
+      return Response.json({ error: 'Unsupported interview mode' }, { status: 400 })
+    }
+    if ((interviewMode === 'managerial' || interviewMode === 'hr') &&
+      (!companyName || typeof companyName !== 'string' || companyName.trim().length === 0)) {
+      return Response.json({ error: 'Company name is required for Managerial and HR modes' }, { status: 400 })
+    }
+    if (companyName !== undefined && (typeof companyName !== 'string' || companyName.trim().length > 100)) {
+      return Response.json({ error: 'Company name must be 100 characters or fewer' }, { status: 400 })
     }
 
     // Ensure user exists in our database
@@ -40,6 +51,8 @@ export async function POST(request: NextRequest) {
       data: {
         userId: user.id,
         topic: topic.trim(),
+        interviewMode: interviewMode as InterviewMode,
+        companyName: typeof companyName === 'string' ? companyName.trim() : null,
         language,
         status: 'active',
       },
@@ -105,6 +118,7 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         topic: true,
+        interviewMode: true,
         status: true,
         createdAt: true,
         updatedAt: true,

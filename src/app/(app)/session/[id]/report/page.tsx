@@ -39,6 +39,7 @@ export default async function SessionReportPage({
     <SessionReportClient
       sessionId={id}
       topic={session.topic}
+      interviewMode={session.interviewMode}
       initialReport={report}
     />
   )

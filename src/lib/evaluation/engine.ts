@@ -2,10 +2,11 @@ import { prisma } from '@/lib/db'
 import { generateWithFallback } from '@/lib/ai/provider'
 import { describeImage } from '@/lib/services/visionService'
 import { EvaluationReportSchema, type EvaluationReport } from './schema'
+import { INTERVIEW_MODE_DETAILS } from '@/lib/interview/modes'
 
-const EVALUATION_PROMPT = `You are an expert educational evaluator. Analyze the following teaching session where a student attempted to explain a topic to a peer.
+const EVALUATION_PROMPT = `You are an expert interview evaluator. Analyze the following interview simulation where a candidate answered questions.
 
-Evaluate meaning independently of the language used. Missing concepts are gaps, not misconceptions. A misconception requires an actively stated incorrect claim. Use attached images as additional evidence. Respond in {language}; retain technical terms in English when clearer. Score strictly — be honest but constructive.
+Evaluate meaning independently of the language used. For technical interviews, assess correctness and depth. For managerial interviews, assess leadership judgment, prioritization, communication, and outcomes. For HR interviews, assess clarity, self-awareness, collaboration, and use of concrete examples. Missing concepts are gaps, not misconceptions. A misconception requires an actively stated incorrect claim. Use attached images as additional evidence. Respond in {language}; retain technical terms in English when clearer. Score strictly — be honest but constructive.
 
 You MUST respond with ONLY a valid JSON object matching this exact schema:
 
@@ -28,6 +29,8 @@ SCORING GUIDELINES:
 - 0-29: Little to no demonstrated understanding
 
 Topic: {topic}
+Interview mode: {interviewMode}
+Company context: {companyName}
 
 Session conversation:
 {conversation}
@@ -90,6 +93,8 @@ export async function evaluateSession(sessionId: string, options?: { language?: 
 
   const prompt = extendedPrompt
     .replace('{topic}', session.topic)
+    .replace('{interviewMode}', INTERVIEW_MODE_DETAILS[session.interviewMode].label)
+    .replace('{companyName}', session.companyName || 'Not specified')
     .replace('{conversation}', conversation)
     .replace('{language}', language);
 
