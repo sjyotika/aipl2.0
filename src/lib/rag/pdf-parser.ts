@@ -1,48 +1,40 @@
-import { PDFParse, VerbosityLevel } from 'pdf-parse'
+import DOMMatrix from '@thednp/dommatrix'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-let workerConfigured = false
+type TextItem = { str: string }
 
-function configurePdfWorker() {
-  if (!workerConfigured) {
-    const workerPath = path.join(
-      process.cwd(),
-      'node_modules',
-      'pdf-parse',
-      'dist',
-      'worker',
-      'pdf.worker.mjs'
-    )
-    PDFParse.setWorker(pathToFileURL(workerPath).href)
-    workerConfigured = true
-  }
+function normalizeText(text: string): string {
+  text = text.replace(/\s+/g, ' ')
+  text = text.replace(/\n\d+\n/g, '\n')
+  text = text.replace(/\n{3,}/g, '\n\n')
+  return text.trim()
 }
 
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
-  configurePdfWorker()
+  globalThis.DOMMatrix ??= DOMMatrix as unknown as typeof globalThis.DOMMatrix
+  const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  const workerPath = path.join(
+    process.cwd(),
+    'node_modules',
+    'pdfjs-dist',
+    'legacy',
+    'build',
+    'pdf.worker.mjs'
+  )
+  GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href
+  const document = await getDocument({
+    data: new Uint8Array(buffer),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+  }).promise
+  const pages: string[] = []
 
-  const pdfData = new Uint8Array(buffer)
-  const parser = new PDFParse({
-    data: pdfData,
-    verbosity: VerbosityLevel.ERRORS,
-  })
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const page = await document.getPage(pageNumber)
+    const content = await page.getTextContent()
+    pages.push((content.items as TextItem[]).map((item) => item.str).join(' '))
+  }
 
-  const result = await parser.getText()
-
-  let text = result.text
-
-  // Clean and normalize text
-  // Remove excessive whitespace
-  text = text.replace(/\s+/g, ' ')
-
-  // Remove page numbers and headers/footers patterns
-  text = text.replace(/\n\d+\n/g, '\n')
-
-  // Normalize line breaks
-  text = text.replace(/\n{3,}/g, '\n\n')
-
-  await parser.destroy()
-
-  return text.trim()
+  return normalizeText(pages.join('\n'))
 }

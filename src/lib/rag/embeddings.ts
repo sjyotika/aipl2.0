@@ -1,22 +1,40 @@
-const HF_API_URL = 'https://router.huggingface.co/hf-inference/models/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/pipeline/feature-extraction'
+import { pipeline } from '@huggingface/transformers'
 
-/**
- * Generate multilingual embeddings using Hugging Face Inference API.
- * Produces 384-dimensional vectors
- */
-export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+const HF_API_URL = 'https://router.huggingface.co/hf-inference/models/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/pipeline/feature-extraction'
+const LOCAL_MODEL = 'Xenova/paraphrase-multilingual-MiniLM-L12-v2'
+const EMBEDDING_DIMENSIONS = 384
+
+type EmbeddingPipeline = Awaited<ReturnType<typeof pipeline>>
+
+let localPipeline: Promise<EmbeddingPipeline> | undefined
+
+function validateEmbeddings(embeddings: number[][]): number[][] {
+  if (embeddings.length === 0 || embeddings.some((embedding) => embedding.length !== EMBEDDING_DIMENSIONS)) {
+    throw new Error(`Embedding provider returned vectors that are not ${EMBEDDING_DIMENSIONS}-dimensional`)
+  }
+
+  return embeddings
+}
+
+async function generateLocalEmbeddings(texts: string[]): Promise<number[][]> {
+  localPipeline ??= pipeline('feature-extraction', process.env.EMBEDDING_MODEL || LOCAL_MODEL)
+  const extractor = await localPipeline as unknown as (
+    inputs: string[],
+    options: { pooling: 'mean'; normalize: true }
+  ) => Promise<{ tolist(): number[][] }>
+  const output = await extractor(texts, { pooling: 'mean', normalize: true })
+  return validateEmbeddings(output.tolist() as number[][])
+}
+
+async function generateHostedEmbeddings(texts: string[]): Promise<number[][]> {
   const apiKey = process.env.HUGGINGFACE_API_KEY
   if (!apiKey) {
     throw new Error('HUGGINGFACE_API_KEY is not set')
   }
 
-  // Process in batches of 16 to avoid API limits
-  const batchSize = 16
   const allEmbeddings: number[][] = []
 
-  for (let i = 0; i < texts.length; i += batchSize) {
-    const batch = texts.slice(i, i + batchSize)
-
+  for (let i = 0; i < texts.length; i += 16) {
     const response = await fetch(HF_API_URL, {
       method: 'POST',
       headers: {
@@ -24,10 +42,8 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        inputs: batch,
-        options: {
-          wait_for_model: true,
-        },
+        inputs: texts.slice(i, i + 16),
+        options: { wait_for_model: true },
       }),
     })
 
@@ -36,11 +52,21 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
       throw new Error(`Hugging Face API error: ${response.status} - ${error}`)
     }
 
-    const embeddings = await response.json() as number[][]
-    allEmbeddings.push(...embeddings)
+    allEmbeddings.push(...(await response.json() as number[][]))
   }
 
-  return allEmbeddings
+  return validateEmbeddings(allEmbeddings)
+}
+
+/**
+ * Generate multilingual embeddings using local Transformers.js by default.
+ * Set EMBEDDING_PROVIDER=huggingface to use the hosted API instead.
+ */
+export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+  if (texts.length === 0) return []
+  return process.env.EMBEDDING_PROVIDER === 'huggingface'
+    ? generateHostedEmbeddings(texts)
+    : generateLocalEmbeddings(texts)
 }
 
 /**

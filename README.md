@@ -98,7 +98,7 @@ We recently shipped a major update addressing speed and scoring consistency:
 | Vector DB | pgvector (384-dim embeddings) |
 | Primary LLM | Groq — Llama 3.3 70B Versatile |
 | Fallback LLM | Google Gemini 2.0 Flash |
-| Embeddings | HuggingFace paraphrase-multilingual-MiniLM-L12-v2 |
+| Embeddings | Transformers.js local `paraphrase-multilingual-MiniLM-L12-v2` (Hugging Face hosted API optional) |
 | Auth | Supabase Auth |
 | Storage | Supabase Storage |
 | Voice | Web Speech API |
@@ -142,43 +142,15 @@ Edit `.env.local` with your actual API keys (see `.env.example` for the full lis
 
 ### 4. Set Up Database
 
-Run this SQL in your Supabase SQL Editor:
+Apply `supabase/migrations/001_vector_search.sql` in your Supabase SQL Editor, or run it against the configured database with:
 
-```sql
--- Enable pgvector
-create extension if not exists vector;
-
--- Vector insert function
-create or replace function insert_document_chunk(
-  p_document_id uuid,
-  p_content text,
-  p_embedding vector(384),
-  p_metadata jsonb
-) returns void as $$
-begin
-  insert into document_chunks (id, document_id, content, embedding, metadata)
-  values (gen_random_uuid(), p_document_id, p_content, p_embedding, p_metadata);
-end;
-$$ language plpgsql;
-
--- Vector search function
-create or replace function match_document_chunks(
-  query_embedding vector(384),
-  match_count int,
-  p_session_id uuid
-) returns table (content text, similarity float) as $$
-begin
-  return query
-    select dc.content, 1 - (dc.embedding <=> query_embedding) as similarity
-    from document_chunks dc
-    join documents d on d.id = dc.document_id
-    where d.session_id = p_session_id
-    and dc.embedding is not null
-    order by dc.embedding <=> query_embedding
-    limit match_count;
-end;
-$$ language plpgsql;
+```bash
+npx prisma db execute --file supabase/migrations/001_vector_search.sql
 ```
+
+The migration enables pgvector and creates the insert/search RPCs used by RAG. It returns `document_id` from the search function so invalid or unrelated documents can be filtered by the application.
+
+The migration is the source of truth for manual SQL setup.
 
 ### 5. Generate Prisma Client & Push Schema
 
@@ -192,11 +164,14 @@ npx prisma db push
 Set these server-only variables in `.env.local` when using the extended input pipeline:
 
 ```env
+EMBEDDING_PROVIDER=local
 EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
 FASTER_WHISPER_URL=https://your-whisper-service/transcribe
 GEMINI_VISION_MODEL=gemini-2.0-flash
 MAX_IMAGE_SIZE_MB=5
 ```
+
+Local embeddings download the `Xenova/paraphrase-multilingual-MiniLM-L12-v2` model on first use and produce the 384-dimensional vectors required by pgvector. Set `EMBEDDING_PROVIDER=huggingface` only when hosted Hugging Face inference access is enabled.
 
 `FASTER_WHISPER_URL` is optional. Without it, supported browsers use their native speech recognition with the selected locale. Chat uses Groq first and falls back to Gemini, while image uploads are stored in a private Supabase `images` bucket and accessed by the server through short-lived signed URLs.
 
